@@ -150,7 +150,7 @@ fn parse_cookie_header(base_url: &str, header: &str) -> eyre::Result<store::Cook
     }
 
     let mut cookies = Vec::new();
-    for part in value.split(';') {
+    for (index, part) in value.split(';').enumerate() {
         let part = part.trim();
         if part.is_empty() {
             continue;
@@ -160,9 +160,12 @@ fn parse_cookie_header(base_url: &str, header: &str) -> eyre::Result<store::Cook
             continue;
         }
 
-        let (name, value) = part
-            .split_once('=')
-            .ok_or_else(|| eyre::eyre!("Invalid browser Cookie header segment '{part}'."))?;
+        let (name, value) = part.split_once('=').ok_or_else(|| {
+            eyre::eyre!(
+                "Invalid browser Cookie header segment {}: expected name=value.",
+                index + 1
+            )
+        })?;
         let name = name.trim();
         let value = value.trim();
         if is_cookie_attribute(name) {
@@ -367,6 +370,19 @@ mod tests {
     fn empty_browser_cookie_header_is_rejected() {
         let error = parse_cookie_header("https://forge.example.com", "Cookie:").unwrap_err();
         assert!(error.to_string().contains("Cookie header was empty"));
+    }
+
+    #[test]
+    fn malformed_browser_cookie_header_does_not_echo_cookie_value() {
+        let error = parse_cookie_header(
+            "https://forge.example.com",
+            "session-secret-without-an-equals-sign",
+        )
+        .unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("segment 1"));
+        assert!(!message.contains("session-secret-without-an-equals-sign"));
     }
 
     #[test]
