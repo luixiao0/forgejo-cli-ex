@@ -46,12 +46,16 @@ async fn run_status(args: AuthStatusCommand) -> eyre::Result<()> {
             println!("{}", serde_json::to_string_pretty(&payload)?);
         }
         return Err(eyre!(
-            "No stored UI creds for '{}'. Run `fj-ex auth login` first.",
+            "No stored UI login for '{}'. Run `fj-ex auth login` or `fj-ex auth login --web` first.",
             base_url
         ));
     };
 
-    let username = entry.username.clone().unwrap_or_else(|| "?".to_string());
+    let username = entry
+        .username
+        .clone()
+        .unwrap_or_else(|| "web-session".to_string());
+    let has_creds = has_complete_creds(&entry);
     let has_cookie_jar = entry.cookie_jar.is_some();
 
     let mut session_ok = false;
@@ -74,7 +78,8 @@ async fn run_status(args: AuthStatusCommand) -> eyre::Result<()> {
                     "hostKey": host_key,
                     "storePath": store_path.display().to_string(),
                     "username": username,
-                    "hasCreds": true,
+                    "hasCreds": has_creds,
+                    "authMethod": entry.auth_method,
                     "hasCookieJar": has_cookie_jar,
                     "sessionOk": false,
                     "relogged": false,
@@ -82,7 +87,8 @@ async fn run_status(args: AuthStatusCommand) -> eyre::Result<()> {
                 println!("{}", serde_json::to_string_pretty(&payload)?);
             }
             return Err(eyre!(
-                "Not logged in to '{}' (cookie session invalid and --no-relogin specified).",
+                "Not logged in to '{}' (cookie session invalid and --no-relogin specified). Run `fj-ex auth login --host {} --web` for SSO/browser login.",
+                base_url,
                 base_url
             ));
         }
@@ -103,7 +109,8 @@ async fn run_status(args: AuthStatusCommand) -> eyre::Result<()> {
             "hostKey": host_key,
             "storePath": store_path.display().to_string(),
             "username": username,
-            "hasCreds": true,
+            "hasCreds": has_creds,
+            "authMethod": entry.auth_method,
             "hasCookieJar": has_cookie_jar,
             "sessionOk": session_ok,
             "relogged": relogged,
@@ -143,6 +150,8 @@ async fn run_list(args: AuthListCommand) -> eyre::Result<()> {
                     "hostKey": host_key,
                     "baseUrl": base_url,
                     "username": entry.username.clone(),
+                    "hasCreds": has_complete_creds(entry),
+                    "authMethod": entry.auth_method.clone(),
                     "updatedUtc": entry.updated_utc.clone(),
                     "hasCookieJar": entry.cookie_jar.is_some(),
                 })
@@ -162,7 +171,7 @@ async fn run_list(args: AuthListCommand) -> eyre::Result<()> {
     }
 
     for (host_key, entry) in by_host {
-        let username = entry.username.unwrap_or_else(|| "?".to_string());
+        let username = entry.username.unwrap_or_else(|| "web-session".to_string());
         println!("{username}@{host_key}");
     }
     Ok(())
@@ -181,7 +190,7 @@ async fn run_show(args: AuthShowCommand) -> eyre::Result<()> {
     let info = crate::store::get_store_entry(&base_url).await?;
     let entry = info.entry.ok_or_else(|| {
         eyre!(
-            "No stored UI creds for '{}'. Run `fj-ex auth login` first.",
+            "No stored UI login for '{}'. Run `fj-ex auth login` or `fj-ex auth login --web` first.",
             base_url
         )
     })?;
@@ -203,6 +212,7 @@ async fn run_show(args: AuthShowCommand) -> eyre::Result<()> {
             "hostKey": host_key,
             "storePath": store_path.display().to_string(),
             "username": entry.username,
+            "authMethod": entry.auth_method,
             "updatedUtc": entry.updated_utc,
             "hasPassword": entry.password.as_ref().map(|p| !p.is_empty()).unwrap_or(false),
             "cookieJar": cookie_summary,
@@ -218,10 +228,14 @@ async fn run_show(args: AuthShowCommand) -> eyre::Result<()> {
         return Ok(());
     }
 
-    let username = entry.username.unwrap_or_else(|| "?".to_string());
+    let username = entry.username.unwrap_or_else(|| "web-session".to_string());
     println!("Host:      {base_url}");
     println!("HostKey:   {host_key}");
     println!("Username:  {username}");
+    println!(
+        "Auth:      {}",
+        entry.auth_method.as_deref().unwrap_or("password")
+    );
     println!(
         "Updated:   {}",
         entry.updated_utc.unwrap_or_else(|| "?".to_string())
@@ -255,7 +269,7 @@ async fn run_logout(args: AuthLogoutCommand) -> eyre::Result<()> {
 
     let removed = crate::store::delete_store_entry(&base_url).await?;
     if let Some(entry) = removed {
-        let username = entry.username.unwrap_or_else(|| "?".to_string());
+        let username = entry.username.unwrap_or_else(|| "web-session".to_string());
         println!("signed out of {username}@{host_key}");
     } else {
         println!("already signed out of {host_key}");
@@ -291,7 +305,7 @@ pub async fn run_nuget_api_key(args: AuthNugetApiKeyCommand) -> eyre::Result<()>
         .await?
         .ok_or_else(|| {
             eyre!(
-                "No stored UI creds for '{}'. Run `fj-ex auth login` first.",
+                "No stored UI login for '{}'. Run `fj-ex auth login` or `fj-ex auth login --web` first.",
                 base_url
             )
         })?;
@@ -369,6 +383,17 @@ pub async fn run_nuget_api_key(args: AuthNugetApiKeyCommand) -> eyre::Result<()>
     println!("FORGEJO_NUGET_SOURCE={registry_url}");
     println!("FORGEJO_NUGET_API_KEY={}", created.token);
     Ok(())
+}
+
+fn has_complete_creds(entry: &crate::store::StoreEntry) -> bool {
+    entry
+        .username
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty())
+        && entry
+            .password
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
 }
 
 fn default_nuget_token_name() -> String {

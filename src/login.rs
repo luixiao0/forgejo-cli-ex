@@ -1,4 +1,6 @@
-use crate::cli::LoginCommand;
+use std::process::Command;
+
+use crate::{cli::LoginCommand, store};
 
 struct LoginInput {
     username: String,
@@ -13,6 +15,10 @@ pub async fn run(args: LoginCommand) -> eyre::Result<()> {
         args.target.remote.as_deref(),
     )?;
     let base_url = target.base_url;
+
+    if args.web {
+        return run_web_login(&base_url, target.unix_socket.as_deref()).await;
+    }
 
     let input = resolve_login_input(args).await?;
 
@@ -46,6 +52,162 @@ pub async fn run(args: LoginCommand) -> eyre::Result<()> {
     println!("Saved UI creds to: {}", store_path.display());
 
     Ok(())
+}
+
+async fn run_web_login(base_url: &str, unix_socket: Option<&std::path::Path>) -> eyre::Result<()> {
+    if unix_socket.is_some() || base_url.starts_with("http+unix://") {
+        return Err(eyre::eyre!(
+            "--web requires an http:// or https:// Forgejo URL; Unix-socket targets cannot be opened in a browser."
+        ));
+    }
+
+    let parsed = url::Url::parse(base_url)
+        .map_err(|err| eyre::eyre!("Invalid Forgejo base URL '{base_url}': {err}"))?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return Err(eyre::eyre!(
+            "--web requires an http:// or https:// Forgejo URL with a host."
+        ));
+    }
+
+    let login_url = format!("{base_url}/user/login");
+    println!("Opening Forgejo login: {login_url}");
+    match open_browser(&login_url) {
+        Ok(status) if status.success() => {}
+        Ok(status) => {
+            eprintln!("Browser opener exited with {status}.");
+            eprintln!("Open the URL above manually and continue here.");
+        }
+        Err(err) => {
+            eprintln!("Could not open a browser automatically: {err}");
+            eprintln!("Open the URL above manually and continue here.");
+        }
+    }
+
+    eprintln!(
+        "After the browser login completes, copy the request Cookie header for this Forgejo host and paste it below."
+    );
+    eprintln!(
+        "The cookie is validated against /user/settings and stored without saving a password."
+    );
+    let cookie_header = prompt_password("Browser Cookie header").await?;
+    let cookie_jar = parse_cookie_header(base_url, &cookie_header)?;
+
+    let session =
+        crate::session::UiSession::new_with_socket(base_url, Some(&cookie_jar), unix_socket)?;
+    if !session.test_session().await? {
+        return Err(eyre::eyre!(
+            "The browser session was not accepted by '{}'. Copy the Cookie header after completing Forgejo/SSO login and run `fj-ex auth login --host {} --web` again.",
+            base_url,
+            base_url
+        ));
+    }
+
+    let cookie_jar = session.cookie_jar()?;
+    store::set_web_cookie_jar(base_url, cookie_jar).await?;
+
+    let store_path = store::ui_creds_store_paths()?.path;
+    let host_label = parsed.host_str().unwrap_or(base_url);
+    println!("web@{host_label}");
+    println!("Saved browser session to: {}", store_path.display());
+    Ok(())
+}
+
+fn open_browser(url: &str) -> std::io::Result<std::process::ExitStatus> {
+    #[cfg(target_os = "macos")]
+    {
+        return Command::new("open").arg(url).status();
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        return Command::new("xdg-open").arg(url).status();
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        return Command::new("cmd").args(["/C", "start", "", url]).status();
+    }
+
+    #[allow(unreachable_code)]
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "no supported browser opener for this platform",
+    ))
+}
+
+fn parse_cookie_header(base_url: &str, header: &str) -> eyre::Result<store::CookieJar> {
+    let url = url::Url::parse(base_url)
+        .map_err(|err| eyre::eyre!("Invalid Forgejo base URL '{base_url}': {err}"))?;
+    let domain = url
+        .host_str()
+        .ok_or_else(|| eyre::eyre!("Forgejo base URL has no host: {base_url}"))?;
+    let mut value = header.trim();
+    if let Some(cookie_header) = value
+        .get(..7)
+        .filter(|prefix| prefix.eq_ignore_ascii_case("cookie:"))
+    {
+        value = value[cookie_header.len()..].trim();
+    }
+
+    let mut cookies = Vec::new();
+    for part in value.split(';') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+
+        if is_cookie_attribute(part) {
+            continue;
+        }
+
+        let (name, value) = part
+            .split_once('=')
+            .ok_or_else(|| eyre::eyre!("Invalid browser Cookie header segment '{part}'."))?;
+        let name = name.trim();
+        let value = value.trim();
+        if is_cookie_attribute(name) {
+            continue;
+        }
+        if name.is_empty() || value.is_empty() {
+            return Err(eyre::eyre!(
+                "Browser Cookie header contains an empty cookie name or value."
+            ));
+        }
+
+        cookies.push(store::CookieRecord {
+            name: name.to_string(),
+            value: value.to_string(),
+            domain: domain.to_string(),
+            host_only: true,
+            path: "/".to_string(),
+            expires_utc: None,
+            secure: url.scheme() == "https",
+            http_only: false,
+            same_site: None,
+        });
+    }
+
+    if cookies.is_empty() {
+        return Err(eyre::eyre!(
+            "Browser Cookie header was empty. Copy the Cookie request header after login."
+        ));
+    }
+
+    Ok(store::CookieJar {
+        saved_utc: Some(
+            time::OffsetDateTime::now_utc()
+                .format(&time::format_description::well_known::Rfc3339)
+                .unwrap_or_default(),
+        ),
+        cookies,
+    })
+}
+
+fn is_cookie_attribute(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "domain" | "expires" | "max-age" | "path" | "samesite" | "secure" | "httponly"
+    )
 }
 
 async fn resolve_login_input(args: LoginCommand) -> eyre::Result<LoginInput> {
@@ -184,6 +346,41 @@ mod tests {
         assert_eq!(resolve_otp(&args, &lines).as_deref(), Some("654321"));
     }
 
+    #[test]
+    fn browser_cookie_header_is_imported_for_the_target_host() {
+        let jar = parse_cookie_header(
+            "https://forge.example.com",
+            "Cookie: i_like_forgejo=session%3D1; _csrf=csrf-value=with-equals",
+        )
+        .unwrap();
+
+        assert_eq!(jar.cookies.len(), 2);
+        assert_eq!(jar.cookies[0].name, "i_like_forgejo");
+        assert_eq!(jar.cookies[0].value, "session%3D1");
+        assert_eq!(jar.cookies[0].domain, "forge.example.com");
+        assert!(jar.cookies[0].host_only);
+        assert!(jar.cookies[0].secure);
+        assert_eq!(jar.cookies[1].value, "csrf-value=with-equals");
+    }
+
+    #[test]
+    fn empty_browser_cookie_header_is_rejected() {
+        let error = parse_cookie_header("https://forge.example.com", "Cookie:").unwrap_err();
+        assert!(error.to_string().contains("Cookie header was empty"));
+    }
+
+    #[test]
+    fn cookie_attributes_are_not_stored_as_request_cookies() {
+        let jar = parse_cookie_header(
+            "https://forge.example.com",
+            "session=value; Path=/; Secure; HttpOnly; SameSite=Lax",
+        )
+        .unwrap();
+
+        assert_eq!(jar.cookies.len(), 1);
+        assert_eq!(jar.cookies[0].name, "session");
+    }
+
     fn test_login_command() -> LoginCommand {
         LoginCommand {
             target: crate::cli::TargetArgs {
@@ -191,6 +388,7 @@ mod tests {
                 repo: None,
                 remote: None,
             },
+            web: false,
             userpass: None,
             username: None,
             password: None,

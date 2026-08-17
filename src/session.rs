@@ -82,7 +82,7 @@ impl UiSession {
 
         let creds = store::get_ui_creds(&normalized).await?.ok_or_else(|| {
             eyre!(
-                "No stored UI creds for '{}'. Run `fj-ex auth login` (or legacy `fj-ex login`) first.",
+                "No stored UI login for '{}'. Run `fj-ex auth login` or `fj-ex auth login --web` first.",
                 normalized
             )
         })?;
@@ -175,7 +175,7 @@ impl UiSession {
 
         let creds = store::get_ui_creds(self.storage_base_url()).await?.ok_or_else(|| {
             eyre!(
-                "No stored UI creds for '{}'. Run `fj-ex auth login` (or legacy `fj-ex login`) first.",
+                "No stored UI login for '{}'. Run `fj-ex auth login` or `fj-ex auth login --web` first.",
                 self.storage_base_url()
             )
         })?;
@@ -261,9 +261,10 @@ impl UiSession {
         let ok = self.test_session().await?;
         if !ok {
             return Err(eyre!(
-                "Login failed for '{}' on '{}' (session validation returned to the login flow).",
+                "Login failed for '{}' on '{}' (session validation returned to the login flow). If this Forgejo instance uses SSO, run `fj-ex auth login --host {} --web`.",
                 username,
-                self.base_url
+                self.base_url,
+                self.storage_base_url()
             ));
         }
 
@@ -405,6 +406,10 @@ impl UiSession {
         let jar = session_cookies::cookie_jar_from_store(&self.cookie_store)?;
         store::save_cookie_jar(self.storage_base_url(), jar).await?;
         Ok(())
+    }
+
+    pub(crate) fn cookie_jar(&self) -> eyre::Result<store::CookieJar> {
+        session_cookies::cookie_jar_from_store(&self.cookie_store)
     }
 
     pub async fn persist_cookie_jar_required(&self) -> eyre::Result<()> {

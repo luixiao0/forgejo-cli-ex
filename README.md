@@ -21,6 +21,9 @@ fj-ex --help
 # Login (interactive)
 fj-ex auth login --host forge.example.com
 
+# Login through Forgejo/SSO in a browser (no password is saved)
+fj-ex auth login --host forge.example.com --web
+
 # Login with 2FA in scripts (stdin lines are password, then passcode)
 printf "my-password\n123456\n" | fj-ex auth login --host forge.example.com --username my-user --password-stdin --otp-stdin
 
@@ -93,6 +96,8 @@ fj auth login      # stored API token for Authorization: token ...
 This is required for automatic re-login. Downloaded logs and artifacts may contain secrets — handle accordingly.
 
 If your account uses two-factor authentication, `fj-ex auth login` prompts for the current passcode after the password step. For noninteractive use, pass `--otp`, `--otp-stdin`, or set `FJ_OTP`. The passcode is not stored; only the resulting UI cookies are stored so later commands can reuse the session until Forgejo expires it.
+
+For Forgejo instances that use SSO or otherwise reject password login, use `fj-ex auth login --host forge.example.com --web`. `fj-ex` opens the Forgejo login page, then asks for the browser's request `Cookie` header after the web login completes (the browser Network panel can copy it as cURL; paste only the `Cookie: ...` header). It verifies that cookie against `/user/settings` and stores only the web session cookie, so no password is written for that login method. A later `auth status` or action command will report an expired web session; repeat the same `--web` login to refresh it.
 
 ## License
 

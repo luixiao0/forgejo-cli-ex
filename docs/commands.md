@@ -11,6 +11,7 @@ See the main [README](../README.md) for install and quickstart.
 fj-ex auth login --host forge.example.com                      # interactive
 fj-ex auth login --host forge.example.com --username my-user --password-stdin
 fj-ex auth login --host forge.example.com --username my-user --password-stdin --otp-stdin
+fj-ex auth login --host forge.example.com --web                # Forgejo/SSO browser login
 fj-ex auth status --host forge.example.com
 fj-ex auth list
 fj-ex auth show   --host forge.example.com
@@ -26,6 +27,14 @@ echo "my-password" | fj-ex auth login --host forge.example.com --username my-use
 
 Two-factor passcodes are requested only when Forgejo redirects to the 2FA form. For scripts, use
 `--otp-stdin`, `--otp`, or `FJ_OTP`; passcodes are not stored.
+
+For SSO or instances where password login is unavailable, use the browser flow:
+
+```sh
+fj-ex auth login --host forge.example.com --web
+```
+
+The command opens `/user/login`, waits for the browser login to finish, and securely prompts for the browser request `Cookie` header. In a browser Network panel, use the request's copy-as-cURL action and paste only its `Cookie: ...` header. It validates the session with `/user/settings` before saving a cookie-only web session; it does not save a password. Repeat the command when the web session expires. The browser flow requires an `http://` or `https://` Forgejo target and is not available for Unix-socket targets.
 
 ```sh
 printf "my-password\n123456\n" | fj-ex auth login --host forge.example.com --username my-user --password-stdin --otp-stdin

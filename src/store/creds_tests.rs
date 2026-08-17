@@ -3,7 +3,8 @@ use std::{path::Path, sync::Arc, time::Duration};
 use super::{
     creds::{
         save_cookie_jar_required_with_paths, save_cookie_jar_with_paths, set_ui_creds_with_paths,
-        CookieJar, CookieRecord, CredsStore, StoreEntry,
+        set_web_cookie_jar_with_paths, CookieJar, CookieRecord, CredsStore, StoreEntry,
+        WEB_COOKIE_AUTH_METHOD,
     },
     file::{read_creds_store_with_paths, update_creds_store},
     lock::{acquire_store_lock, StoreLockMode},
@@ -127,6 +128,44 @@ fn save_cookie_jar_removes_existing_cookie_only_entry() {
 
     let store = read_creds_store_with_paths(&paths).unwrap();
     assert!(store.is_empty());
+}
+
+#[test]
+fn web_cookie_entries_are_persisted_and_refreshable_without_passwords() {
+    let temp = tempfile::tempdir().unwrap();
+    let paths = test_store_paths(temp.path());
+
+    set_web_cookie_jar_with_paths(
+        &paths,
+        "https://forge.example.com",
+        test_cookie_jar("web-session"),
+    )
+    .unwrap();
+
+    let store = read_creds_store_with_paths(&paths).unwrap();
+    let entry = store.get("forge.example.com").unwrap();
+    assert_eq!(entry.auth_method.as_deref(), Some(WEB_COOKIE_AUTH_METHOD));
+    assert!(entry.username.is_none());
+    assert!(entry.password.is_none());
+    assert_eq!(
+        entry.cookie_jar.as_ref().unwrap().cookies[0].value,
+        "web-session"
+    );
+
+    save_cookie_jar_with_paths(
+        &paths,
+        "https://forge.example.com",
+        test_cookie_jar("refreshed-session"),
+    )
+    .unwrap();
+
+    let store = read_creds_store_with_paths(&paths).unwrap();
+    let entry = store.get("forge.example.com").unwrap();
+    assert_eq!(entry.auth_method.as_deref(), Some(WEB_COOKIE_AUTH_METHOD));
+    assert_eq!(
+        entry.cookie_jar.as_ref().unwrap().cookies[0].value,
+        "refreshed-session"
+    );
 }
 
 #[test]

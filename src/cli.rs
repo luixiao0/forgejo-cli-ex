@@ -11,7 +11,7 @@ pub struct App {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    /// Authentication and credential management (UI session cookies + plaintext creds).
+    /// Authentication and credential management (UI cookies; optional password creds).
     #[command(subcommand)]
     Auth(AuthCommand),
     /// Token minting helpers.
@@ -29,7 +29,7 @@ pub enum Command {
 
 #[derive(Subcommand, Debug)]
 pub enum AuthCommand {
-    /// Log in to an instance (stores plaintext creds + UI session cookies).
+    /// Log in with a password or a Forgejo/SSO browser session.
     Login(LoginCommand),
     /// Check login status against the host.
     Status(AuthStatusCommand),
@@ -115,6 +115,20 @@ pub struct TargetArgs {
 pub struct LoginCommand {
     #[command(flatten)]
     pub target: TargetArgs,
+
+    /// Open the Forgejo/SSO login page and import the resulting browser session.
+    #[arg(
+        long,
+        conflicts_with_all = [
+            "userpass",
+            "username",
+            "password",
+            "password_stdin",
+            "otp",
+            "otp_stdin"
+        ]
+    )]
+    pub web: bool,
 
     /// Credentials as user:pass (unsafe: visible in process list)
     #[arg(long, conflicts_with_all = ["username", "password", "password_stdin"])]

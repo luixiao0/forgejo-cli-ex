@@ -68,6 +68,7 @@ pub(super) fn repair_creds_store_from_raw(raw: &str) -> eyre::Result<CredsStore>
                 username: Some(username.clone()),
                 password: Some(password.clone()),
                 user_pass: Some(format!("{username}:{password}")),
+                auth_method: None,
                 updated_utc,
                 cookie_jar: None,
                 extra: BTreeMap::default(),
