@@ -216,6 +216,15 @@ fn remote_url_to_host_and_repo(url_s: &str) -> eyre::Result<Option<(String, Repo
     let host = url
         .host_str()
         .ok_or_else(|| eyre!("remote url missing host"))?;
+    let host = if matches!(url.scheme(), "http" | "https") {
+        match url.port() {
+            Some(port) if host.contains(':') => format!("[{host}]:{port}"),
+            Some(port) => format!("{host}:{port}"),
+            None => host.to_string(),
+        }
+    } else {
+        host.to_string()
+    };
 
     let mut segments = url
         .path_segments()
@@ -232,7 +241,7 @@ fn remote_url_to_host_and_repo(url_s: &str) -> eyre::Result<Option<(String, Repo
     let name = name.strip_suffix(".git").unwrap_or(name);
 
     Ok(Some((
-        host.to_string(),
+        host,
         RepoName {
             owner: owner.to_string(),
             name: name.to_string(),
@@ -463,6 +472,16 @@ mod tests {
                 .unwrap()
                 .unwrap();
         assert_eq!(host, "forge.example.com");
+        assert_eq!(repo.as_owner_slash_name(), "alice/widgets");
+    }
+
+    #[test]
+    fn remote_url_preserves_https_port() {
+        let (host, repo) =
+            remote_url_to_host_and_repo("https://forge.example.com:2097/alice/widgets.git")
+                .unwrap()
+                .unwrap();
+        assert_eq!(host, "forge.example.com:2097");
         assert_eq!(repo.as_owner_slash_name(), "alice/widgets");
     }
 

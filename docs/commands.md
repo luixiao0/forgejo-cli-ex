@@ -19,6 +19,10 @@ fj-ex auth logout --host forge.example.com
 fj-ex auth clear-cookies --host forge.example.com
 ```
 
+When no `--host` is supplied, `fj-ex` derives the target from the selected Git
+remote. HTTP(S) remotes retain their non-default port, so a remote such as
+`https://forge.example.com:2097/owner/repo.git` uses `https://forge.example.com:2097`.
+
 Password via stdin (preferred over `--password`):
 
 ```sh
