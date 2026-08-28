@@ -54,6 +54,32 @@ Legacy alias: `fj-ex login --host forge.example.com`
 
 ---
 
+## pr
+
+Create a pull request. The source defaults to the current Git branch and the
+target defaults to the repository's configured default branch:
+
+```sh
+fj-ex pr create --title "fix: correct behavior" --body "Summary"
+fj-ex pr create --title "fix: correct behavior" --body-file pr.md --draft
+printf 'Summary from stdin\n' | fj-ex pr create --title "fix: correct behavior" --body-file -
+```
+
+List or inspect pull requests:
+
+```sh
+fj-ex pr list --state open
+fj-ex pr list --head fix/my-branch --json
+fj-ex pr view 42
+fj-ex pr view 42 --json
+```
+
+PR commands prefer the API token stored by `fj auth login` and fall back to
+the username/password stored by `fj-ex auth login`. A cookie-only web login
+requires an `fj` API token for REST API access.
+
+---
+
 ## token mint nuget
 
 Create a NuGet API key using the stored `fj` API token plus the stored `fj-ex` username/password:

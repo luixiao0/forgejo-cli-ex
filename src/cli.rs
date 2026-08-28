@@ -19,6 +19,8 @@ pub enum Command {
     Token(TokenCommand),
     /// Forgejo Actions: workflows, runs, jobs, logs, artifacts, cancel/rerun.
     Actions(ActionsCommand),
+    /// Pull requests: create, list, and view.
+    Pr(PullRequestCommand),
     /// Smoke test for Actions access (useful for debugging auth/connectivity/log downloads).
     #[command(name = "smoke-test")]
     SmokeTest(SmokeTestCommand),
@@ -233,6 +235,113 @@ pub struct ActionsCommand {
 
     #[command(subcommand)]
     pub command: ActionsSubcommand,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct PullRequestCommand {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    #[command(subcommand)]
+    pub command: PullRequestSubcommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum PullRequestSubcommand {
+    /// Create a pull request.
+    Create {
+        /// Pull request title.
+        #[arg(long)]
+        title: String,
+
+        /// Pull request body.
+        #[arg(long, conflicts_with = "body_file")]
+        body: Option<String>,
+
+        /// Read the pull request body from a file, or `-` for stdin.
+        #[arg(long, value_name = "PATH", conflicts_with = "body")]
+        body_file: Option<std::path::PathBuf>,
+
+        /// Source branch (default: current Git branch).
+        #[arg(long)]
+        head: Option<String>,
+
+        /// Target branch (default: repository default branch).
+        #[arg(long)]
+        base: Option<String>,
+
+        /// Create the pull request as a draft.
+        #[arg(long)]
+        draft: bool,
+
+        /// Print JSON output.
+        #[arg(long)]
+        json: bool,
+    },
+    /// List pull requests.
+    List {
+        /// Filter by state.
+        #[arg(long, value_enum, default_value_t = PullRequestState::Open)]
+        state: PullRequestState,
+
+        /// Filter by exact source branch name.
+        #[arg(long)]
+        head: Option<String>,
+
+        /// Page number (1-based).
+        #[arg(
+            long,
+            default_value_t = 1,
+            value_parser = clap::value_parser!(u32).range(1..)
+        )]
+        page: u32,
+
+        /// Items per page.
+        #[arg(
+            long,
+            default_value_t = 20,
+            value_parser = clap::value_parser!(u32).range(1..)
+        )]
+        limit: u32,
+
+        /// Always print the header row.
+        #[arg(long)]
+        header: bool,
+
+        /// Never print the header row.
+        #[arg(long, conflicts_with = "header")]
+        no_header: bool,
+
+        /// Print JSON output.
+        #[arg(long)]
+        json: bool,
+    },
+    /// View one pull request by number.
+    View {
+        /// Pull request number.
+        number: NonZeroU64,
+
+        /// Print JSON output.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PullRequestState {
+    Open,
+    Closed,
+    All,
+}
+
+impl PullRequestState {
+    pub fn as_api_value(self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::Closed => "closed",
+            Self::All => "all",
+        }
+    }
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -576,4 +685,33 @@ pub enum ActionsRunnersSubcommand {
         #[arg(long)]
         json: bool,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_pull_request_create_command() {
+        let app = App::try_parse_from([
+            "fj-ex", "pr", "create", "--title", "fix chat", "--head", "fix/chat", "--base",
+            "master",
+        ])
+        .unwrap();
+
+        match app.command {
+            Command::Pr(PullRequestCommand {
+                command:
+                    PullRequestSubcommand::Create {
+                        title, head, base, ..
+                    },
+                ..
+            }) => {
+                assert_eq!(title, "fix chat");
+                assert_eq!(head.as_deref(), Some("fix/chat"));
+                assert_eq!(base.as_deref(), Some("master"));
+            }
+            command => panic!("unexpected command: {command:?}"),
+        }
+    }
 }

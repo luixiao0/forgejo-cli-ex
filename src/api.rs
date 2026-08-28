@@ -14,6 +14,7 @@ const USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VE
 pub struct ApiClient {
     base_url: String,
     client: reqwest::Client,
+    basic_auth: Option<(String, String)>,
 }
 
 impl ApiClient {
@@ -46,7 +47,36 @@ impl ApiClient {
 
         let client = builder.build().wrap_err("failed to build http client")?;
 
-        Ok(Self { base_url, client })
+        Ok(Self {
+            base_url,
+            client,
+            basic_auth: None,
+        })
+    }
+
+    pub fn new_basic_with_socket(
+        base_url: &str,
+        username: &str,
+        password: &str,
+        unix_socket: Option<&Path>,
+    ) -> eyre::Result<Self> {
+        let base_url = crate::target::normalize_base_url(base_url)?;
+        let base_url = base_url.trim_end_matches('/').to_string();
+        let mut builder = reqwest::Client::builder()
+            .user_agent(USER_AGENT)
+            .timeout(Duration::from_secs(60));
+
+        #[cfg(unix)]
+        if let Some(socket_path) = unix_socket {
+            builder = builder.unix_socket(socket_path);
+        }
+
+        let client = builder.build().wrap_err("failed to build http client")?;
+        Ok(Self {
+            base_url,
+            client,
+            basic_auth: Some((username.to_string(), password.to_string())),
+        })
     }
 
     pub fn api_v1_url(&self, path: &str) -> String {
@@ -69,8 +99,7 @@ impl ApiClient {
 
     pub async fn get_json<T: DeserializeOwned>(&self, url: &str) -> eyre::Result<T> {
         let resp = self
-            .client
-            .get(url)
+            .with_auth(self.client.get(url))
             .send()
             .await
             .wrap_err_with(|| format!("GET {url} failed"))?;
@@ -94,6 +123,43 @@ impl ApiClient {
                 body.len()
             )
         })
+    }
+
+    pub async fn post_json<T: DeserializeOwned, B: Serialize>(
+        &self,
+        url: &str,
+        body: &B,
+    ) -> eyre::Result<T> {
+        let resp = self
+            .with_auth(self.client.post(url))
+            .json(body)
+            .send()
+            .await
+            .wrap_err_with(|| format!("POST {url} failed"))?;
+
+        let status = resp.status();
+        let body = resp
+            .bytes()
+            .await
+            .wrap_err_with(|| format!("failed to read response body from POST {url}"))?;
+
+        if !status.is_success() {
+            return Err(api_error("POST", url, status, &body));
+        }
+
+        serde_json::from_slice::<T>(&body).wrap_err_with(|| {
+            format!(
+                "failed to decode JSON from POST {url} (body_length={})",
+                body.len()
+            )
+        })
+    }
+
+    fn with_auth(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        match self.basic_auth.as_ref() {
+            Some((username, password)) => request.basic_auth(username, Some(password)),
+            None => request,
+        }
     }
 
     pub async fn post_json_with_basic_auth<T: DeserializeOwned, B: Serialize>(
@@ -131,6 +197,19 @@ impl ApiClient {
                 body.len()
             )
         })
+    }
+}
+
+fn api_error(method: &str, url: &str, status: reqwest::StatusCode, body: &[u8]) -> eyre::Report {
+    let message = serde_json::from_slice::<Value>(body)
+        .ok()
+        .and_then(|value| value.get("message")?.as_str().map(str::to_string));
+    match message {
+        Some(message) => eyre!("{method} {url} failed: HTTP {status}: {message}"),
+        None => eyre!(
+            "{method} {url} failed: HTTP {status} (body_length={})",
+            body.len()
+        ),
     }
 }
 

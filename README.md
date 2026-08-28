@@ -34,6 +34,11 @@ fj-ex token list --host forge.example.com
 # List recent runs
 fj-ex actions runs --repo owner/name --latest
 
+# Create and inspect pull requests
+fj-ex pr create --title "fix: correct behavior" --body-file pr.md
+fj-ex pr list --state open
+fj-ex pr view 42
+
 # Stream job logs to stdout
 fj-ex actions logs job --repo owner/name --latest --job-index 0
 
@@ -62,6 +67,7 @@ fj-ex actions runners jobs  --repo owner/name --waiting
 | `actions rerun` | Rerun a workflow (optionally `--failed-only`) |
 | `actions trigger` | Dispatch a `workflow_dispatch` event |
 | `actions runners` | Runner tokens + queued jobs (REST API; uses `fj` token store) |
+| `pr` | Create, list, and view pull requests through the Forgejo REST API |
 | `smoke-test` | Non-destructive end-to-end validation |
 
 Full command reference with all flags: [docs/commands.md](docs/commands.md)

@@ -5,6 +5,7 @@ mod cli;
 mod html;
 mod login;
 mod output;
+mod pulls;
 mod session;
 mod session_cookies;
 mod smoke_test;
@@ -24,6 +25,7 @@ async fn main() -> eyre::Result<()> {
         Command::Token(args) => token::run(args).await,
         Command::Login(args) => auth::run_legacy_login(args).await,
         Command::Actions(args) => actions::run(args).await,
+        Command::Pr(args) => pulls::run(args).await,
         Command::SmokeTest(args) => smoke_test::run(args).await,
     }
 }
