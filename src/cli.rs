@@ -19,7 +19,7 @@ pub enum Command {
     Token(TokenCommand),
     /// Forgejo Actions: workflows, runs, jobs, logs, artifacts, cancel/rerun.
     Actions(ActionsCommand),
-    /// Pull requests: create, list, and view.
+    /// Pull requests: create, list, view, and merge.
     Pr(PullRequestCommand),
     /// Smoke test for Actions access (useful for debugging auth/connectivity/log downloads).
     #[command(name = "smoke-test")]
@@ -320,6 +320,19 @@ pub enum PullRequestSubcommand {
     View {
         /// Pull request number.
         number: NonZeroU64,
+
+        /// Print JSON output.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Merge one pull request after Forgejo accepts its current head.
+    Merge {
+        /// Pull request number.
+        number: NonZeroU64,
+
+        /// Delete the source branch after the merge.
+        #[arg(long)]
+        delete_branch: bool,
 
         /// Print JSON output.
         #[arg(long)]
@@ -710,6 +723,28 @@ mod tests {
                 assert_eq!(title, "fix chat");
                 assert_eq!(head.as_deref(), Some("fix/chat"));
                 assert_eq!(base.as_deref(), Some("master"));
+            }
+            command => panic!("unexpected command: {command:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_pull_request_merge_command() {
+        let app = App::try_parse_from(["fj-ex", "pr", "merge", "42", "--delete-branch"]).unwrap();
+
+        match app.command {
+            Command::Pr(PullRequestCommand {
+                command:
+                    PullRequestSubcommand::Merge {
+                        number,
+                        delete_branch,
+                        json,
+                    },
+                ..
+            }) => {
+                assert_eq!(number.get(), 42);
+                assert!(delete_branch);
+                assert!(!json);
             }
             command => panic!("unexpected command: {command:?}"),
         }

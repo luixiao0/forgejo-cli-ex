@@ -72,6 +72,8 @@ fj-ex pr list --state open
 fj-ex pr list --head fix/my-branch --json
 fj-ex pr view 42
 fj-ex pr view 42 --json
+fj-ex pr merge 42
+fj-ex pr merge 42 --delete-branch --json
 ```
 
 PR commands prefer the API token stored by `fj auth login` and fall back to

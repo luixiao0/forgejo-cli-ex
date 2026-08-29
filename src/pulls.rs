@@ -42,6 +42,13 @@ struct CreatePullRequest<'a> {
     draft: bool,
 }
 
+#[derive(Debug, Serialize)]
+struct MergePullRequest {
+    #[serde(rename = "Do")]
+    method: &'static str,
+    delete_branch_after_merge: bool,
+}
+
 pub async fn run(args: PullRequestCommand) -> eyre::Result<()> {
     let target = crate::target::resolve_target(
         args.target.host.as_deref(),
@@ -146,6 +153,36 @@ pub async fn run(args: PullRequestCommand) -> eyre::Result<()> {
             let url = format!("{pulls_url}/{number}");
             let pull: PullRequest = client.get_json(&url).await?;
             print_pull(&target.base_url, &repo, &pull, json)?;
+        }
+        PullRequestSubcommand::Merge {
+            number,
+            delete_branch,
+            json,
+        } => {
+            let url = format!("{pulls_url}/{number}");
+            let pull: PullRequest = client.get_json(&url).await?;
+            if pull.state != "open" {
+                return Err(eyre!("pull request #{number} is not open"));
+            }
+            if pull.draft {
+                return Err(eyre!("pull request #{number} is still a draft"));
+            }
+            if pull.mergeable == Some(false) {
+                return Err(eyre!("pull request #{number} is not mergeable"));
+            }
+
+            let merge_url = format!("{url}/merge");
+            client
+                .post_expect_success(
+                    &merge_url,
+                    &MergePullRequest {
+                        method: "merge",
+                        delete_branch_after_merge: delete_branch,
+                    },
+                )
+                .await?;
+            let merged: PullRequest = client.get_json(&url).await?;
+            print_pull(&target.base_url, &repo, &merged, json)?;
         }
     }
 

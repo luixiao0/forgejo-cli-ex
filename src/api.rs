@@ -155,6 +155,26 @@ impl ApiClient {
         })
     }
 
+    pub async fn post_expect_success<B: Serialize>(&self, url: &str, body: &B) -> eyre::Result<()> {
+        let resp = self
+            .with_auth(self.client.post(url))
+            .json(body)
+            .send()
+            .await
+            .wrap_err_with(|| format!("POST {url} failed"))?;
+
+        let status = resp.status();
+        let body = resp
+            .bytes()
+            .await
+            .wrap_err_with(|| format!("failed to read response body from POST {url}"))?;
+
+        if !status.is_success() {
+            return Err(api_error("POST", url, status, &body));
+        }
+        Ok(())
+    }
+
     fn with_auth(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
         match self.basic_auth.as_ref() {
             Some((username, password)) => request.basic_auth(username, Some(password)),
